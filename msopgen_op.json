@@ -1,0 +1,56 @@
+[
+    {
+        "op": "BatchMatmulMaxSum",
+        "language": "cpp",
+        "input_desc": [
+            {
+                "name": "x1",
+                "param_type": "REQUIRED",
+                "format": [
+                    "ND"
+                ],
+                "dtype": [
+                    "float16",
+                    "bfloat16"
+                ]
+            },
+            {
+                "name": "x2",
+                "param_type": "REQUIRED",
+                "format": [
+                    "ND"
+                ],
+                "dtype": [
+                    "float16",
+                    "bfloat16"
+                ]
+            }
+        ],
+        "output_desc": [
+            {
+                "name": "y",
+                "param_type": "REQUIRED",
+                "format": [
+                    "ND"
+                ],
+                "dtype": [
+                    "float32"
+                ]
+            }
+        ],
+        "attr": [
+            {
+                "name": "transposeX1",
+                "param_type": "OPTIONAL",
+                "type": "bool",
+                "default_value": false
+            },
+            {
+                "name": "transposeX2",
+                "param_type": "OPTIONAL",
+                "type": "bool",
+                "default_value": false
+            }
+        ]
+    }
+]

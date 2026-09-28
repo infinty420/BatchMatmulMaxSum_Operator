@@ -1,0 +1,29 @@
+# ========== 编译产物 ==========
+build/
+output/
+cmake-build-*/
+*.o
+*.so
+*.ko
+*.a
+
+# ========== Python ==========
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ========== Golden 生成的大数据文件（npy 不入库） ==========
+scripts/data/
+*.npy
+
+# ========== 性能分析产物 ==========
+*.log
+msprof/
+
+# ========== IDE / 操作系统 ==========
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
