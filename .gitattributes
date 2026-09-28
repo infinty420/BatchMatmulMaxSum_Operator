@@ -1,0 +1,8 @@
+# 统一文本文件换行符，保证在 CANNLab Linux 环境检出时 build.sh 等脚本为 LF
+* text=auto eol=lf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.npy binary
+*.so binary
