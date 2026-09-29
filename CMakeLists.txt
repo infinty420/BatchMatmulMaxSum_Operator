@@ -1,8 +1,8 @@
 # ============================================================
 # BatchMatmulMaxSum Ascend-C 自定义算子主编译配置
 # 产物：libbatch_matmul_max_sum.so
-# 说明：Host 侧使用 g++ 编译，Device 侧 Kernel 使用 CANN 自带
-#       ccec 编译器编译，最终链接为同一个算子动态库。
+# 说明：Host 侧使用 g++ 编译，Device 侧 Kernel 使用 CANN 9.0 自带
+#       bisheng 编译器编译，最终链接为同一个算子动态库。
 # ============================================================
 cmake_minimum_required(VERSION 3.16)
 project(BatchMatmulMaxSum CXX)
@@ -11,8 +11,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# CMake >= 3.31 默认向链接器传递 --dependency-file，毕昇链接器不支持，显式关闭
+set(CMAKE_LINK_DEPENDS_USE_LINKER FALSE)
+
 # ---------- 1. 定位 CANN Toolkit ----------
-# 优先使用 CMake 传入参数，其次环境变量，最后使用默认安装路径
 if(NOT DEFINED ASCEND_HOME_PATH)
     if(DEFINED ENV{ASCEND_HOME_PATH})
         set(ASCEND_HOME_PATH "$ENV{ASCEND_HOME_PATH}")
@@ -28,15 +30,17 @@ if(NOT EXISTS "${ASCEND_HOME_PATH}/include")
 endif()
 message(STATUS "ASCEND_HOME_PATH = ${ASCEND_HOME_PATH}")
 
-# ---------- 2. AI Core 目标架构 ----------
-# Atlas A2 训练系列（Ascend 910B）默认为 dav-c220；
-# 若评测环境为其他硬件，可通过 -DASCEND_ARCH=xxx 覆盖。
-if(NOT DEFINED ASCEND_ARCH)
-    set(ASCEND_ARCH "dav-c220" CACHE STRING "AI Core architecture, e.g. dav-c220")
-endif()
-message(STATUS "ASCEND_ARCH     = ${ASCEND_ARCH}")
+# 系统架构前缀，如 aarch64-linux / x86_64-linux
+set(SYSTEM_PREFIX "${CMAKE_SYSTEM_PROCESSOR}-linux")
 
-# ---------- 3. Host 侧头文件目录 ----------
+# ---------- 2. AI Core 目标架构 ----------
+# Atlas A2（910B/910_93）对应 bisheng --npu-arch=dav-2201
+if(NOT DEFINED ASCEND_ARCH)
+    set(ASCEND_ARCH "dav-2201" CACHE STRING "bisheng --npu-arch, e.g. dav-2201 for 910B")
+endif()
+message(STATUS "ASCEND_ARCH (bisheng --npu-arch) = ${ASCEND_ARCH}")
+
+# ---------- 3. 头文件目录 ----------
 set(HOST_INC_DIRS
     "${ASCEND_HOME_PATH}/include"
     "${ASCEND_HOME_PATH}/include/aclnn"
@@ -68,37 +72,36 @@ target_include_directories(op_host_obj PRIVATE
 )
 target_compile_options(op_host_obj PRIVATE -O2 -Wall -Wextra)
 
-# ---------- 5. Device 侧 Kernel 编译（ccec） ----------
+# ---------- 5. Device 侧 Kernel 编译（bisheng） ----------
 set(KERNEL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/batch_matmul_max_sum_kernel.cpp")
 set(KERNEL_OBJ "${CMAKE_BINARY_DIR}/batch_matmul_max_sum_kernel.o")
 
-find_program(CCEC_BIN ccec
-    PATHS "${ASCEND_HOME_PATH}/compiler/ccec_compiler/bin"
+# bisheng 是 CANN 9.0 的 Ascend-C 编译器，替代旧版 ccec
+find_program(BISHENG_BIN bisheng
+    PATHS "${ASCEND_HOME_PATH}/${SYSTEM_PREFIX}/ccec_compiler/bin"
     NO_DEFAULT_PATH
 )
-if(NOT CCEC_BIN)
-    set(CCEC_BIN "ccec")
+if(NOT BISHENG_BIN)
+    set(BISHENG_BIN "bisheng")
 endif()
+message(STATUS "bisheng compiler = ${BISHENG_BIN}")
 
-# 拼接 Kernel 编译需要的 -I 参数：
-#   toolkit 根 include（kernel_operator、matmul 高阶 API）
-#   op_host 目录（Host/Device 共用的 TilingData 契约头）
-set(KERNEL_INC_FLAGS
-    "-I${ASCEND_HOME_PATH}/include"
-    "-I${CMAKE_CURRENT_SOURCE_DIR}/op_host"
-)
+# Kernel 编译参数：
+#   --npu-arch=dav-2201  指定 910B AICore 架构
+#   -xasc                启用 Ascend-C 语言模式
+set(KERNEL_COMPILE_FLAGS "--npu-arch=${ASCEND_ARCH} -xasc")
 
 add_custom_command(
     OUTPUT ${KERNEL_OBJ}
-    COMMAND ${CCEC_BIN}
-        -c -fpic -O2
-        -mllvm --aarch64
-        -mllvm -cce-aicore-arch=${ASCEND_ARCH}
-        ${KERNEL_INC_FLAGS}
+    COMMAND ${BISHENG_BIN}
+        -c -O2
+        ${KERNEL_COMPILE_FLAGS}
+        -I"${ASCEND_HOME_PATH}/include"
+        -I"${CMAKE_CURRENT_SOURCE_DIR}/op_host"
         ${KERNEL_SRC}
         -o ${KERNEL_OBJ}
     DEPENDS ${KERNEL_SRC}
-    COMMENT "使用 ccec 编译 Ascend-C 融合 Kernel (arch=${ASCEND_ARCH})"
+    COMMENT "使用 bisheng 编译 Ascend-C 融合 Kernel (npu-arch=${ASCEND_ARCH})"
     VERBATIM
 )
 add_custom_target(op_kernel_target DEPENDS ${KERNEL_OBJ})
@@ -111,13 +114,13 @@ add_library(batch_matmul_max_sum SHARED
 add_dependencies(batch_matmul_max_sum op_kernel_target)
 
 target_link_directories(batch_matmul_max_sum PRIVATE "${ASCEND_HOME_PATH}/lib64")
-# 以下均为 CANN Host 侧框架基础库，随 Toolkit 发布
+# CANN 9.0 Host 侧框架基础库
 target_link_libraries(batch_matmul_max_sum PRIVATE
-    opsproto
     register
-    slog
-    ge_common
-    error_manager
+    tiling_api
+    platform
+    ascendcl
+    runtime
 )
 
 # ---------- 7. 安装规则 ----------

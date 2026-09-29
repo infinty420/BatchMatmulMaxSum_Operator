@@ -14,7 +14,6 @@
 #include "batch_matmul_max_sum_tiling.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "tiling/tiling_api.h"
-#include "graph/debug/ge_log.h"
 
 namespace optiling {
 
@@ -32,10 +31,10 @@ constexpr uint32_t MIN_K = 32;
 constexpr uint32_t WORKSPACE_ALIGN = 64;
 
 /*
- * 错误上报辅助：打印日志并返回失败，由调用方直接 return。
+ * 错误上报辅助：直接返回失败状态（CANN 9.0 新式算子不依赖 ge_log 宏，
+ * 框架会根据 graphStatus 记录错误）。
  */
-static ge::graphStatus TilingFail(const std::string &msg) {
-    GELOGE(ge::GRAPH_FAILED, "BatchMatmulMaxSum tiling failed: %s", msg.c_str());
+static ge::graphStatus TilingFail() {
     return ge::GRAPH_FAILED;
 }
 
@@ -54,14 +53,14 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     const gert::StorageShape *x1Shape = context->GetInputShape(0);
     const gert::StorageShape *x2Shape = context->GetInputShape(1);
     if (x1Shape == nullptr || x2Shape == nullptr) {
-        return TilingFail("无法获取输入 shape");
+        return TilingFail();
     }
 
     const ge::StorageShape &x1Storage = x1Shape->GetStorageShape();
     const ge::StorageShape &x2Storage = x2Shape->GetStorageShape();
 
     if (x1Storage.GetDimNum() != 3 || x2Storage.GetDimNum() != 3) {
-        return TilingFail("x1、x2 必须均为 3 维 Tensor");
+        return TilingFail();
     }
 
     // ---------------- 2. 读取属性 transposeX1 / transposeX2 ----------------
@@ -69,8 +68,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     bool transposeX2 = false;
     const gert::RuntimeAttrs *attrs = context->GetAttrs();
     if (attrs != nullptr) {
-        const bool *tp1 = attrs->GetAttrPointer<bool>(0);
-        const bool *tp2 = attrs->GetAttrPointer<bool>(1);
+        // CANN 9.0 按属性索引取值（索引对应 OpDef 中 Attr 注册顺序）
+        const bool *tp1 = attrs->GetBool(0);
+        const bool *tp2 = attrs->GetBool(1);
         if (tp1 != nullptr) {
             transposeX1 = *tp1;
         }
@@ -97,38 +97,38 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
 
     // ---------------- 4. 合法性校验（赛题全部约束） ----------------
     if (x2D0 != batchB) {
-        return TilingFail("x1 与 x2 的 batch 维必须相等，不支持 batch broadcast");
+        return TilingFail();
     }
     if (logicalK1 != logicalK2) {
-        return TilingFail("x1 与 x2 的 K 维必须相等");
+        return TilingFail();
     }
     if (batchB < 1 || batchB > static_cast<int64_t>(MAX_BATCH)) {
-        return TilingFail("B 必须满足 1 <= B <= 64");
+        return TilingFail();
     }
     if (logicalM < 1 || logicalM > static_cast<int64_t>(MAX_DIM)) {
-        return TilingFail("M 必须满足 1 <= M <= 8192");
+        return TilingFail();
     }
     if (logicalN < 1 || logicalN > static_cast<int64_t>(MAX_DIM)) {
-        return TilingFail("N 必须满足 1 <= N <= 8192");
+        return TilingFail();
     }
     if (logicalK1 < static_cast<int64_t>(MIN_K) || logicalK1 > static_cast<int64_t>(MAX_DIM)) {
-        return TilingFail("K 必须满足 32 <= K <= 8192");
+        return TilingFail();
     }
     if (logicalK1 % 8 != 0) {
-        return TilingFail("K 必须为 8 的整数倍");
+        return TilingFail();
     }
     if (batchB * logicalM * logicalK1 > MAX_ELEMENTS) {
-        return TilingFail("B*M*K 不得超过 2^26");
+        return TilingFail();
     }
     if (batchB * logicalN * logicalK1 > MAX_ELEMENTS) {
-        return TilingFail("B*N*K 不得超过 2^26");
+        return TilingFail();
     }
 
     // 数据类型校验：两输入类型必须相同，且仅支持 FP16 / BF16
     ge::DataType x1Dtype = context->GetInputDesc(0)->GetDataType();
     ge::DataType x2Dtype = context->GetInputDesc(1)->GetDataType();
     if (x1Dtype != x2Dtype) {
-        return TilingFail("x1 与 x2 的数据类型必须相同");
+        return TilingFail();
     }
     uint8_t dataTypeFlag = 0;
     matmul_tiling::DataType cubeDtype = matmul_tiling::DataType::DT_FLOAT16;
@@ -139,7 +139,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         dataTypeFlag = 1;
         cubeDtype = matmul_tiling::DataType::DT_BF16;
     } else {
-        return TilingFail("x1、x2 仅支持 float16 / bfloat16");
+        return TilingFail();
     }
 
     // ---------------- 5. 分块与多核任务切分 ----------------
@@ -189,7 +189,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     // ---------------- 7. 下发 TilingData ----------------
     TilingData tiling = TilingData();
     if (cubeTiling.GetTiling(tiling.cubeTilingData) == -1) {
-        return TilingFail("Cube tiling 生成失败");
+        return TilingFail();
     }
 
     // workspace 用户区：每个任务 1 个 FP32 partial，0 号核汇合后按固定任务顺序归约，
@@ -221,11 +221,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     size_t workspaceSize = userWorkspaceBytes + systemWorkspaceSize;
     ge::graphStatus ret = context->SetWorkspaceSizes({{workspaceSize, nullptr}});
     if (ret != ge::GRAPH_SUCCESS) {
-        return TilingFail("设置 workspace 失败");
+        return TilingFail();
     }
 
-    GELOGI("BatchMatmulMaxSum tiling ok: B=%u M=%u N=%u K=%u blocks=%u tasks=%u ws=%zu",
-           b, m, n, k, blockNum, totalTasks, workspaceSize);
     return ge::GRAPH_SUCCESS;
 }
 
