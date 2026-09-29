@@ -187,8 +187,9 @@ private:
         ReduceSum<float>(sumScalar, runningMax, workLocal, static_cast<int32_t>(actualRows));
         AscendC::PipeBarrier<PIPE_V>();
 
-        // 单个 FP32（4B）不满足普通 DataCopy 的 32B 对齐，使用 DataCopyPad 写出
-        AscendC::DataCopyExtParams padParams = {1, sizeof(float), 0, 0};
+        // 单个 FP32（4B）不满足普通 DataCopy 的 32B 对齐，使用 DataCopyPad 写出。
+        // DataCopyExtParams 共 5 个字段：{blockCount, blockLen(字节), srcStride, dstStride, rsv}
+        AscendC::DataCopyExtParams padParams = {1, static_cast<uint32_t>(sizeof(float)), 0, 0, 0};
         DataCopyPad(partialGlobal_[taskId], sumScalar, padParams);
     }
 
@@ -258,7 +259,7 @@ private:
             // 一次读入该 batch 的全部行块 partial（numMTiles ≤ 128 个 FP32，
             // 长度可能不足 32B，使用 DataCopyPad；blockLen 单位为字节）
             AscendC::DataCopyExtParams loadParams = {
-                1, numMTiles_ * sizeof(float), 0, 0};
+                1, static_cast<uint32_t>(numMTiles_ * sizeof(float)), 0, 0, 0};
             DataCopyPad(partialGroup, partialGlobal_[taskStart], loadParams);
 
             // M 维 Sum 后即得 y[b]
@@ -267,7 +268,7 @@ private:
             AscendC::PipeBarrier<PIPE_V>();
 
             // 标量写回最终输出
-            AscendC::DataCopyExtParams storeParams = {1, sizeof(float), 0, 0};
+            AscendC::DataCopyExtParams storeParams = {1, static_cast<uint32_t>(sizeof(float)), 0, 0, 0};
             DataCopyPad(yGlobal_[b], sumScalar, storeParams);
         }
     }
@@ -299,7 +300,10 @@ private:
 extern "C" __global__ __aicore__ void batch_matmul_max_sum(
     GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling)
 {
-    GET_TILING_DATA(tilingData, tiling);
+    // 自定义 TilingData 结构体需先注册默认解析器，再通过 GET_TILING_DATA_WITH_STRUCT
+    // 从 GM 中的 tiling 缓冲反序列化出本结构（老的 GET_TILING_DATA 宏在直编环境不适用）
+    REGISTER_TILING_DEFAULT(TilingData);
+    GET_TILING_DATA_WITH_STRUCT(TilingData, tilingData, tiling);
 
     AscendC::TPipe pipe;
     if (tilingData.dataType == 0) {
