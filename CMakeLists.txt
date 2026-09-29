@@ -78,7 +78,10 @@ set(KERNEL_OBJ "${CMAKE_BINARY_DIR}/batch_matmul_max_sum_kernel.o")
 
 # bisheng 是 CANN 9.0 的 Ascend-C 编译器，替代旧版 ccec
 find_program(BISHENG_BIN bisheng
-    PATHS "${ASCEND_HOME_PATH}/${SYSTEM_PREFIX}/ccec_compiler/bin"
+    PATHS
+        "${ASCEND_HOME_PATH}/tools/bisheng_compiler/bin"
+        "${ASCEND_HOME_PATH}/${SYSTEM_PREFIX}/ccec_compiler/bin"
+        "${ASCEND_HOME_PATH}/bin"
     NO_DEFAULT_PATH
 )
 if(NOT BISHENG_BIN)
