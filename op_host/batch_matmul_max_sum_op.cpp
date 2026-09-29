@@ -8,6 +8,11 @@
 // ============================================================
 #include "register/op_def_registry.h"
 
+// Tiling 函数前向声明（实现在 batch_matmul_max_sum_tiling.cpp 的 optiling 命名空间中）
+namespace optiling {
+ge::graphStatus TilingFunc(gert::TilingContext *context);
+}
+
 namespace ge {
 
 // ---------------- 输出 Shape 推导 ----------------

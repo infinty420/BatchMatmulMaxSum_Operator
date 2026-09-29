@@ -33,7 +33,7 @@ struct TilingData {
 
     // Cube 高阶 API（Matmul）所需的标准切分参数，由 Host 侧 MultiCoreMatmulTiling 生成。
     // 其形状固定为 [baseM, N, K]（单任务形状），尾行由 Kernel 侧 SetTail 重配。
-    matmul_tiling::TCubeTiling cubeTilingData;
+    optiling::TCubeTiling cubeTilingData;
 };
 
 #endif  // BATCH_MATMUL_MAX_SUM_TILING_H

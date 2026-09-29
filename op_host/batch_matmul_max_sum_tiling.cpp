@@ -57,8 +57,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         return TilingFail();
     }
 
-    const ge::StorageShape &x1Storage = x1Shape->GetStorageShape();
-    const ge::StorageShape &x2Storage = x2Shape->GetStorageShape();
+    const gert::StorageShape &x1Storage = x1Shape->GetStorageShape();
+    const gert::StorageShape &x2Storage = x2Shape->GetStorageShape();
 
     if (x1Storage.GetDimNum() != 3 || x2Storage.GetDimNum() != 3) {
         return TilingFail();
@@ -222,11 +222,12 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     context->SetBlockDim(blockNum);
 
     // workspace 总量 = 用户区 + Matmul 高阶 API 系统区（框架统一申请、分别管理）
+    // CANN 9.0：通过 GetWorkspaceSizes 获取指针数组后直接赋值，无返回值检查。
     size_t systemWorkspaceSize = static_cast<size_t>(platformInfo.GetLibApiWorkSpaceSize());
     size_t workspaceSize = userWorkspaceBytes + systemWorkspaceSize;
-    ge::graphStatus ret = context->SetWorkspaceSizes({{workspaceSize, nullptr}});
-    if (ret != ge::GRAPH_SUCCESS) {
-        return TilingFail();
+    size_t *workspaceSizes = context->GetWorkspaceSizes(1);
+    if (workspaceSizes != nullptr) {
+        workspaceSizes[0] = workspaceSize;
     }
 
     return ge::GRAPH_SUCCESS;
