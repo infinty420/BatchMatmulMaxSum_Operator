@@ -11,20 +11,31 @@
 set -e
 
 # ---------- 1. 自动加载 CANN 环境变量 ----------
-if [ -z "${ASCEND_HOME_PATH}" ]; then
-    for env_script in \
-        "/usr/local/Ascend/ascend-toolkit/set_env.sh" \
-        "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" \
-        "/usr/local/Ascend/cann-9.0.0/set_env.sh"; do
-        if [ -f "${env_script}" ]; then
-            source "${env_script}"
-            break
-        fi
-    done
+# 注意：必须完整 source set_env.sh，bisheng 编译依赖 LD_LIBRARY_PATH、
+# ASCEND_OPP_PATH 等多个环境变量，仅设置 ASCEND_HOME_PATH 不够。
+ENV_SCRIPT=""
+for candidate in \
+    "${ASCEND_HOME_PATH}/set_env.sh" \
+    "/usr/local/Ascend/ascend-toolkit/set_env.sh" \
+    "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" \
+    "/usr/local/Ascend/cann-9.0.0/set_env.sh" \
+    "$HOME/Ascend/cann-9.0.0/set_env.sh"; do
+    if [ -n "${candidate}" ] && [ -f "${candidate}" ]; then
+        ENV_SCRIPT="${candidate}"
+        break
+    fi
+done
+
+if [ -z "${ENV_SCRIPT}" ]; then
+    echo "[ERROR] 未找到 CANN set_env.sh，请先执行：source <CANN Toolkit>/set_env.sh"
+    exit 1
 fi
 
+echo "[INFO] 加载 CANN 环境：${ENV_SCRIPT}"
+source "${ENV_SCRIPT}"
+
 if [ -z "${ASCEND_HOME_PATH}" ]; then
-    echo "[ERROR] 未检测到 CANN 环境，请先执行：source <CANN Toolkit>/set_env.sh"
+    echo "[ERROR] 未检测到 ASCEND_HOME_PATH，请检查 CANN 安装"
     exit 1
 fi
 
