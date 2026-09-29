@@ -12,6 +12,7 @@
 #include <string>
 
 #include "batch_matmul_max_sum_tiling.h"
+#include "register/op_def_registry.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "tiling/tiling_api.h"
 
@@ -125,8 +126,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     }
 
     // 数据类型校验：两输入类型必须相同，且仅支持 FP16 / BF16
-    ge::DataType x1Dtype = context->GetInputDesc(0)->GetDataType();
-    ge::DataType x2Dtype = context->GetInputDesc(1)->GetDataType();
+    ge::DataType x1Dtype = context->GetRequiredInputTensor(0)->GetDataType();
+    ge::DataType x2Dtype = context->GetRequiredInputTensor(1)->GetDataType();
     if (x1Dtype != x2Dtype) {
         return TilingFail();
     }
@@ -187,8 +188,13 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     cubeTiling.SetBufferSpace(-1, -1, -1);
 
     // ---------------- 7. 下发 TilingData ----------------
-    TilingData tiling = TilingData();
-    if (cubeTiling.GetTiling(tiling.cubeTilingData) == -1) {
+    // CANN 9.0：通过 GetTilingData<T>() 获取框架预分配的结构体指针，直接赋值，
+    // 无需调用 SetTilingData（框架按内存布局传递给 Kernel）。
+    TilingData *tiling = context->GetTilingData<TilingData>();
+    if (tiling == nullptr) {
+        return TilingFail();
+    }
+    if (cubeTiling.GetTiling(tiling->cubeTilingData) == -1) {
         return TilingFail();
     }
 
@@ -196,25 +202,24 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     // 不使用原子加，保证多次运行结果确定、无累加乱序。
     uint32_t userWorkspaceBytes = AlignUp(totalTasks * sizeof(float), WORKSPACE_ALIGN);
 
-    tiling.set_batchNum(b);
-    tiling.set_mDim(m);
-    tiling.set_nDim(n);
-    tiling.set_kDim(k);
-    tiling.set_baseM(BASE_M);
-    tiling.set_baseN(BASE_N);
-    tiling.set_numMTiles(numMTiles);
-    tiling.set_numNTiles(numNTiles);
-    tiling.set_totalTasks(totalTasks);
-    tiling.set_blockNum(blockNum);
-    tiling.set_transposeX1(transposeX1 ? 1U : 0U);
-    tiling.set_transposeX2(transposeX2 ? 1U : 0U);
-    tiling.set_dataType(dataTypeFlag);
-    tiling.set_userWorkspaceBytes(userWorkspaceBytes);
+    tiling->batchNum = b;
+    tiling->mDim = m;
+    tiling->nDim = n;
+    tiling->kDim = k;
+    tiling->baseM = BASE_M;
+    tiling->baseN = BASE_N;
+    tiling->numMTiles = numMTiles;
+    tiling->numNTiles = numNTiles;
+    tiling->totalTasks = totalTasks;
+    tiling->blockNum = blockNum;
+    tiling->transposeX1 = transposeX1 ? 1U : 0U;
+    tiling->transposeX2 = transposeX2 ? 1U : 0U;
+    tiling->dataType = dataTypeFlag;
+    tiling->userWorkspaceBytes = userWorkspaceBytes;
 
     // 动态 shape 统一使用 tiling key 0，数据类型通过 dataType 字段在 Kernel 内分支
     context->SetTilingKey(0);
     context->SetBlockDim(blockNum);
-    context->SetTilingData(tiling);
 
     // workspace 总量 = 用户区 + Matmul 高阶 API 系统区（框架统一申请、分别管理）
     size_t systemWorkspaceSize = static_cast<size_t>(platformInfo.GetLibApiWorkSpaceSize());
@@ -225,13 +230,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     }
 
     return ge::GRAPH_SUCCESS;
-}
-
-/*
- * 算子 Tiling 入口注册：框架编译到 BatchMatmulMaxSum 时回调本函数。
- */
-IMPL_OP_OPTILING(BatchMatmulMaxSum) {
-    return TilingFunc(context);
 }
 
 }  // namespace optiling
