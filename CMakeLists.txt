@@ -100,8 +100,8 @@ add_custom_command(
     COMMAND ${BISHENG_BIN}
         -c -O2
         ${KERNEL_COMPILE_FLAGS}
-        -I"${ASCEND_HOME_PATH}/include"
-        -I"${CMAKE_CURRENT_SOURCE_DIR}/op_host"
+        -I${ASCEND_HOME_PATH}/include
+        -I${CMAKE_CURRENT_SOURCE_DIR}/op_host
         ${KERNEL_SRC}
         -o ${KERNEL_OBJ}
     DEPENDS ${KERNEL_SRC}
