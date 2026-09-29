@@ -39,8 +39,8 @@ if [ -z "${ASCEND_HOME_PATH}" ]; then
     exit 1
 fi
 
-# ---------- 2. 目标 AI Core 架构（默认 Atlas A2 / 910B） ----------
-export ASCEND_ARCH="${ASCEND_ARCH:-dav-c220}"
+# ---------- 2. 目标 AI Core 架构（默认 Atlas A2 / 910B，bisheng --npu-arch=dav-2201） ----------
+export ASCEND_ARCH="${ASCEND_ARCH:-dav-2201}"
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
