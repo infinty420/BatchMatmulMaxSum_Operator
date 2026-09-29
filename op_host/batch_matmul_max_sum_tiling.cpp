@@ -57,8 +57,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         return TilingFail();
     }
 
-    const gert::StorageShape &x1Storage = x1Shape->GetStorageShape();
-    const gert::StorageShape &x2Storage = x2Shape->GetStorageShape();
+    // GetStorageShape() 返回物理存储 shape（gert::Shape），含 transpose 后的实际排布
+    const gert::Shape &x1Storage = x1Shape->GetStorageShape();
+    const gert::Shape &x2Storage = x2Shape->GetStorageShape();
 
     if (x1Storage.GetDimNum() != 3 || x2Storage.GetDimNum() != 3) {
         return TilingFail();
