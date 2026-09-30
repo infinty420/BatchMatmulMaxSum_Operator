@@ -71,6 +71,9 @@ target_include_directories(op_host_obj PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/op_host"
 )
 target_compile_options(op_host_obj PRIVATE -O2 -Wall -Wextra)
+# CANN 9.0 Host 侧库使用 _GLIBCXX_USE_CXX11_ABI=0（旧 ABI）编译，
+# 若不匹配会导致 std::string/std::list 等符号 undefined reference。
+target_compile_definitions(op_host_obj PRIVATE _GLIBCXX_USE_CXX11_ABI=0)
 
 # ---------- 5. Device 侧 Kernel 编译（bisheng） ----------
 set(KERNEL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/batch_matmul_max_sum_kernel.cpp")
@@ -118,13 +121,22 @@ add_library(batch_matmul_max_sum SHARED
 add_dependencies(batch_matmul_max_sum op_kernel_target)
 
 target_link_directories(batch_matmul_max_sum PRIVATE "${ASCEND_HOME_PATH}/lib64")
-# CANN 9.0 Host 侧框架基础库
+# CANN 9.0 Host 侧框架库：
+#   register   — OpDef / OP_ADD 算子注册
+#   graph      — ge 命名空间（graphStatus、DT_FLOAT16 等）
+#   gert       — gert 命名空间（TilingContext、Shape 等）
+#   tiling_api — matmul_tiling / optiling::TCubeTiling
+#   platform   — platform_ascendc::PlatformAscendC
+#   ascendcl   — ACL 运行时
+#   dl         — 动态加载
 target_link_libraries(batch_matmul_max_sum PRIVATE
     register
+    graph
+    gert
     tiling_api
     platform
     ascendcl
-    runtime
+    dl
 )
 
 # ---------- 7. 安装规则 ----------
