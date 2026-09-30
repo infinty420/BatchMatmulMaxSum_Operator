@@ -260,7 +260,9 @@ private:
             // 长度可能不足 32B，使用 DataCopyPad；blockLen 单位为字节）
             AscendC::DataCopyExtParams loadParams = {
                 1, static_cast<uint32_t>(numMTiles_ * sizeof(float)), 0, 0, 0};
-            DataCopyPad(partialGroup, partialGlobal_[taskStart], loadParams);
+            // GM→UB 方向必须额外携带 DataCopyPadExtParams：isPad=false 表示不补齐
+            AscendC::DataCopyPadExtParams<float> loadPadCfg = {false, 0, 0, float(0)};
+            DataCopyPad(partialGroup, partialGlobal_[taskStart], loadParams, loadPadCfg);
 
             // M 维 Sum 后即得 y[b]
             ReduceSum<float>(sumScalar, partialGroup, workLocal,
@@ -294,16 +296,30 @@ private:
 };
 
 /*
+ * 从 GM 中的 tiling 缓冲原样拷贝出 TilingData。
+ * 直编环境下不依赖 REGISTER_TILING_DEFAULT / GET_TILING_DATA 宏，
+ * 采用与 CANN 9.0 官方 batch_matmul 样例一致的 32 位逐字拷贝方式
+ *（Host 端 SaveToBuffer 写入的字节布局与结构体一致）。
+ */
+__aicore__ inline void CopyTiling(TilingData *tiling, GM_ADDR tilingGM)
+{
+    uint32_t *ptr = reinterpret_cast<uint32_t *>(tiling);
+    __gm__ uint32_t *tiling32 = reinterpret_cast<__gm__ uint32_t *>(tilingGM);
+    for (uint32_t i = 0; i < sizeof(TilingData) / sizeof(uint32_t); ++i) {
+        ptr[i] = *(tiling32 + i);
+    }
+}
+
+/*
  * Kernel 入口：参数顺序遵循传统算子工程约定
  *   输入 x1、x2 → 输出 y → workspace → tiling
  */
 extern "C" __global__ __aicore__ void batch_matmul_max_sum(
     GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling)
 {
-    // 自定义 TilingData 结构体需先注册默认解析器，再通过 GET_TILING_DATA_WITH_STRUCT
-    // 从 GM 中的 tiling 缓冲反序列化出本结构（老的 GET_TILING_DATA 宏在直编环境不适用）
-    REGISTER_TILING_DEFAULT(TilingData);
-    GET_TILING_DATA_WITH_STRUCT(TilingData, tilingData, tiling);
+    // 从 GM 中的 tiling 缓冲逐字拷贝出 TilingData（直编环境稳定做法）
+    TilingData tilingData;
+    CopyTiling(&tilingData, tiling);
 
     AscendC::TPipe pipe;
     if (tilingData.dataType == 0) {
