@@ -13,8 +13,8 @@
 //   Vector 单元：ReduceMax（N 维）、ReduceSum（M 维）两级归约。
 // ============================================================
 // 头文件包含顺序对齐 CANN 9.0 官方 batch_matmul 样例：
-// kernel_tiling 提供 REGISTER_TILING_DEFAULT / GET_TILING_DATA_WITH_STRUCT 宏与
-// 设备侧 TCubeTiling 的完整构造支持；tiling_api 提供 Cube 高阶 API 切分类型。
+// kernel_tiling / tiling_api 共同提供设备侧 TCubeTiling 的完整定义与构造支持，
+// 以及 REGIST_MATMUL_OBJ 等 Cube 高阶 API 配套设施。
 #include "kernel_tiling/kernel_tiling.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "tiling/tiling_api.h"
@@ -302,17 +302,31 @@ private:
 };
 
 /*
+ * 从 GM 中的 tiling 缓冲原样拷贝出 TilingData。
+ * 直编环境（核函数工程）下框架宏 GET_TILING_DATA_WITH_STRUCT 会展开成
+ * if constexpr 作用域，变量无法在后续语句使用；故采用 CANN 9.0 官方
+ * batch_matmul 样例一致的 32 位逐字拷贝方式（kernel_tiling.h 已提供
+ * 设备侧 TCubeTiling 的完整构造支持，结构体可正常默认构造）。
+ */
+__aicore__ inline void CopyTiling(TilingData *tiling, GM_ADDR tilingGM)
+{
+    uint32_t *ptr = reinterpret_cast<uint32_t *>(tiling);
+    __gm__ uint32_t *tiling32 = reinterpret_cast<__gm__ uint32_t *>(tilingGM);
+    for (uint32_t i = 0; i < sizeof(TilingData) / sizeof(uint32_t); ++i) {
+        ptr[i] = *(tiling32 + i);
+    }
+}
+
+/*
  * Kernel 入口：参数顺序遵循传统算子工程约定
  *   输入 x1、x2 → 输出 y → workspace → tiling
  */
 extern "C" __global__ __aicore__ void batch_matmul_max_sum(
     GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling)
 {
-    // 注册并获取 tiling 结构体：直编工程标准写法（与官方 add_custom 教程一致）。
-    // REGISTER_TILING_DEFAULT 声明默认结构体类型，GET_TILING_DATA_WITH_STRUCT
-    // 将 GM 中的 tiling 缓冲按内存布局填充到栈上 TilingData。
-    REGISTER_TILING_DEFAULT(TilingData);
-    GET_TILING_DATA_WITH_STRUCT(TilingData, tilingData, tiling);
+    // 从 GM 中的 tiling 缓冲逐字拷贝出 TilingData（直编工程标准做法）
+    TilingData tilingData;
+    CopyTiling(&tilingData, tiling);
 
     AscendC::TPipe pipe;
     if (tilingData.dataType == 0) {
