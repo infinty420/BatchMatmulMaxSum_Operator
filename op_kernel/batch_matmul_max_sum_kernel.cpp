@@ -302,18 +302,21 @@ private:
 };
 
 /*
- * 从 GM 中的 tiling 缓冲原样拷贝出 TilingData。
- * 直编环境（核函数工程）下框架宏 GET_TILING_DATA_WITH_STRUCT 会展开成
- * if constexpr 作用域，变量无法在后续语句使用；故采用 CANN 9.0 官方
- * batch_matmul 样例一致的 32 位逐字拷贝方式（kernel_tiling.h 已提供
- * 设备侧 TCubeTiling 的完整构造支持，结构体可正常默认构造）。
+ * 从 GM 中的 tiling 缓冲原样拷贝出 TilingData 的原始字节。
+ *
+ * 设备侧 TCubeTiling 不提供默认构造函数，因此不能直接声明
+ * `TilingData tilingData;`（会触发其成员 TCubeTiling 的构造失败）。
+ * 由于 TilingData 是聚合体（trivially copyable），用对齐字节缓冲承载
+ * 全部字节后 reinterpret_cast 使用即可，不触发任何构造函数，
+ * 内存布局与 Host 侧 GetTilingData 写入的布局完全一致。
  */
-__aicore__ inline void CopyTiling(TilingData *tiling, GM_ADDR tilingGM)
+__aicore__ inline void CopyTilingRaw(uint8_t *dst, GM_ADDR src, uint32_t bytes)
 {
-    uint32_t *ptr = reinterpret_cast<uint32_t *>(tiling);
-    __gm__ uint32_t *tiling32 = reinterpret_cast<__gm__ uint32_t *>(tilingGM);
-    for (uint32_t i = 0; i < sizeof(TilingData) / sizeof(uint32_t); ++i) {
-        ptr[i] = *(tiling32 + i);
+    const uint32_t words = bytes / sizeof(uint32_t);
+    uint32_t *dst32 = reinterpret_cast<uint32_t *>(dst);
+    __gm__ uint32_t *src32 = reinterpret_cast<__gm__ uint32_t *>(src);
+    for (uint32_t i = 0; i < words; ++i) {
+        dst32[i] = *(src32 + i);
     }
 }
 
@@ -324,9 +327,10 @@ __aicore__ inline void CopyTiling(TilingData *tiling, GM_ADDR tilingGM)
 extern "C" __global__ __aicore__ void batch_matmul_max_sum(
     GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling)
 {
-    // 从 GM 中的 tiling 缓冲逐字拷贝出 TilingData（直编工程标准做法）
-    TilingData tilingData;
-    CopyTiling(&tilingData, tiling);
+    // 用对齐字节缓冲承载 TilingData，绕过 TCubeTiling 默认构造限制
+    alignas(uint64_t) uint8_t tilingBuf[sizeof(TilingData)];
+    CopyTilingRaw(tilingBuf, tiling, sizeof(TilingData));
+    TilingData &tilingData = *reinterpret_cast<TilingData *>(tilingBuf);
 
     AscendC::TPipe pipe;
     if (tilingData.dataType == 0) {
