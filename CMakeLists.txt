@@ -94,9 +94,11 @@ message(STATUS "bisheng compiler = ${BISHENG_BIN}")
 
 # Kernel 编译参数（注意：必须用 CMake 列表分号分隔成两个独立参数，
 # 若写成一个带空格的字符串，VERBATIM 下会被整体引号包住，bisheng 无法解析）：
+#   -fPIC                生成位置无关代码（device .o 要链入 host .so，
+#                        aarch64 缺省会报 relocation ... can not be used）
 #   --npu-arch=dav-2201  指定 910B AICore 架构
 #   -xasc                启用 Ascend-C 语言模式
-set(KERNEL_COMPILE_FLAGS "--npu-arch=${ASCEND_ARCH}" "-xasc")
+set(KERNEL_COMPILE_FLAGS "-fPIC" "--npu-arch=${ASCEND_ARCH}" "-xasc")
 
 add_custom_command(
     OUTPUT ${KERNEL_OBJ}
